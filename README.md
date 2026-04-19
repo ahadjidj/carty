@@ -1,8 +1,10 @@
 # Carty — Stock Options & RSU Manager (French tax)
 
 Local-first, client-only web app to manage US-denominated stock grants (RSUs
-and stock options) as a French tax resident. All data stays in your browser
-(`localStorage`); no server, no tracking.
+and stock options) as a French tax resident. All data stays in your browser in
+a real **SQLite database** (via `sql.js` / WebAssembly), persisted as a binary
+snapshot in IndexedDB. No server, no tracking. You can download the raw
+`.sqlite` file at any time and open it in any SQLite tool.
 
 ## What it does
 
@@ -45,7 +47,9 @@ bracket or legislative changes.
 
 - Vite + React 18 + TypeScript
 - Tailwind CSS
-- Zero backend, data persisted in `localStorage`
+- **SQLite** compiled to WebAssembly (`sql.js`)
+- Binary DB snapshot persisted in **IndexedDB** (debounced on each write)
+- Automatic one-shot migration from the previous localStorage format
 
 ## Run
 

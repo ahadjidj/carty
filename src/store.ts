@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useSyncExternalStore } from "react";
+import * as db from "./db";
 import {
   AppState,
   EMPTY_STATE,
@@ -9,98 +10,116 @@ import {
   VestingEvent,
 } from "./types";
 
-const KEY = "carty.state.v1";
+let current: AppState = EMPTY_STATE;
+let ready = false;
+const listeners = new Set<() => void>();
 
-function load(): AppState {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (!raw) return EMPTY_STATE;
-    const parsed = JSON.parse(raw) as AppState;
-    return {
-      ...EMPTY_STATE,
-      ...parsed,
-      settings: { ...EMPTY_STATE.settings, ...(parsed.settings || {}) },
-    };
-  } catch {
-    return EMPTY_STATE;
-  }
+function notify() {
+  for (const l of listeners) l();
 }
 
-function save(state: AppState) {
-  localStorage.setItem(KEY, JSON.stringify(state));
+function refresh() {
+  current = db.loadState();
+  notify();
+}
+
+export async function initStore(): Promise<void> {
+  if (ready) return;
+  await db.initDb();
+  ready = true;
+  refresh();
+}
+
+export function isStoreReady(): boolean {
+  return ready;
+}
+
+function subscribe(cb: () => void) {
+  listeners.add(cb);
+  return () => {
+    listeners.delete(cb);
+  };
+}
+
+function getSnapshot() {
+  return current;
 }
 
 export function useStore() {
-  const [state, setState] = useState<AppState>(() => load());
+  const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 
   useEffect(() => {
-    save(state);
-  }, [state]);
+    if (!ready) void initStore();
+  }, []);
 
   const updateSettings = useCallback((patch: Partial<Settings>) => {
-    setState((s) => ({ ...s, settings: { ...s.settings, ...patch } }));
+    db.updateSettings(patch);
+    refresh();
   }, []);
 
   const addGrant = useCallback((g: Grant) => {
-    setState((s) => ({ ...s, grants: [...s.grants, g] }));
+    db.addGrant(g);
+    refresh();
   }, []);
 
   const updateGrant = useCallback((id: string, patch: Partial<Grant>) => {
-    setState((s) => ({
-      ...s,
-      grants: s.grants.map((g) => (g.id === id ? { ...g, ...patch } : g)),
-    }));
+    const existing = current.grants.find((g) => g.id === id);
+    if (!existing) return;
+    const next: Grant = { ...existing, ...patch, id };
+    db.updateGrant(id, next);
+    refresh();
   }, []);
 
   const deleteGrant = useCallback((id: string) => {
-    setState((s) => ({
-      ...s,
-      grants: s.grants.filter((g) => g.id !== id),
-      vestings: s.vestings.filter((v) => v.grantId !== id),
-      exercises: s.exercises.filter((e) => e.grantId !== id),
-      sales: s.sales.filter((x) => x.grantId !== id),
-    }));
+    db.deleteGrant(id);
+    refresh();
   }, []);
 
   const addVesting = useCallback((v: VestingEvent) => {
-    setState((s) => ({ ...s, vestings: [...s.vestings, v] }));
+    db.addVesting(v);
+    refresh();
   }, []);
 
   const deleteVesting = useCallback((id: string) => {
-    setState((s) => ({
-      ...s,
-      vestings: s.vestings.filter((v) => v.id !== id),
-    }));
+    db.deleteVesting(id);
+    refresh();
   }, []);
 
   const addExercise = useCallback((e: ExerciseEvent) => {
-    setState((s) => ({ ...s, exercises: [...s.exercises, e] }));
+    db.addExercise(e);
+    refresh();
   }, []);
 
   const deleteExercise = useCallback((id: string) => {
-    setState((s) => ({
-      ...s,
-      exercises: s.exercises.filter((e) => e.id !== id),
-    }));
+    db.deleteExercise(id);
+    refresh();
   }, []);
 
   const addSale = useCallback((x: SaleEvent) => {
-    setState((s) => ({ ...s, sales: [...s.sales, x] }));
+    db.addSale(x);
+    refresh();
   }, []);
 
   const deleteSale = useCallback((id: string) => {
-    setState((s) => ({ ...s, sales: s.sales.filter((x) => x.id !== id) }));
+    db.deleteSale(id);
+    refresh();
   }, []);
 
-  const resetAll = useCallback(() => setState(EMPTY_STATE), []);
+  const resetAll = useCallback(() => {
+    db.wipeAll();
+    refresh();
+  }, []);
 
   const importState = useCallback((raw: string) => {
-    const parsed = JSON.parse(raw) as AppState;
-    setState({
-      ...EMPTY_STATE,
-      ...parsed,
-      settings: { ...EMPTY_STATE.settings, ...(parsed.settings || {}) },
-    });
+    db.importState(raw);
+    refresh();
+  }, []);
+
+  const exportDatabase = useCallback((): Uint8Array => db.exportDbBinary(), []);
+
+  const replaceDatabase = useCallback(async (bytes: Uint8Array) => {
+    await db.replaceDbFromBinary(bytes);
+    refresh();
   }, []);
 
   return {
@@ -117,5 +136,7 @@ export function useStore() {
     deleteSale,
     resetAll,
     importState,
+    exportDatabase,
+    replaceDatabase,
   };
 }

@@ -7,6 +7,7 @@ export function SettingsTab() {
   const { state, updateSettings, resetAll, importState } = store;
   const [draft, setDraft] = useState<Settings>(state.settings);
   const fileRef = useRef<HTMLInputElement>(null);
+  const sqliteRef = useRef<HTMLInputElement>(null);
   const [saved, setSaved] = useState(false);
 
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) =>
@@ -30,6 +31,21 @@ export function SettingsTab() {
     URL.revokeObjectURL(url);
   };
 
+  const doExportSqlite = () => {
+    const bytes = store.exportDatabase();
+    const buf = bytes.buffer.slice(
+      bytes.byteOffset,
+      bytes.byteOffset + bytes.byteLength,
+    ) as ArrayBuffer;
+    const blob = new Blob([buf], { type: "application/x-sqlite3" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `carty-${new Date().toISOString().slice(0, 10)}.sqlite`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const doImport = async (f: File) => {
     try {
       const text = await f.text();
@@ -37,6 +53,22 @@ export function SettingsTab() {
       alert("Imported.");
     } catch (e) {
       alert("Import failed: " + (e as Error).message);
+    }
+  };
+
+  const doImportSqlite = async (f: File) => {
+    if (
+      !confirm(
+        "Replace the current database with this SQLite file? Your local data will be overwritten.",
+      )
+    )
+      return;
+    try {
+      const buf = await f.arrayBuffer();
+      await store.replaceDatabase(new Uint8Array(buf));
+      alert("Database replaced.");
+    } catch (e) {
+      alert("Restore failed: " + (e as Error).message);
     }
   };
 
@@ -141,8 +173,22 @@ export function SettingsTab() {
       </div>
 
       <div className="card card-body space-y-3">
-        <h3 className="font-medium">Data management</h3>
+        <div className="flex items-center justify-between">
+          <h3 className="font-medium">Data management</h3>
+          <span className="tag bg-slate-100 text-slate-600">
+            Backend: SQLite (WASM) in IndexedDB
+          </span>
+        </div>
         <div className="flex flex-wrap gap-2">
+          <button className="btn-ghost" onClick={doExportSqlite}>
+            Download .sqlite
+          </button>
+          <button
+            className="btn-ghost"
+            onClick={() => sqliteRef.current?.click()}
+          >
+            Restore .sqlite
+          </button>
           <button className="btn-ghost" onClick={doExport}>
             Export JSON
           </button>
@@ -152,6 +198,17 @@ export function SettingsTab() {
           >
             Import JSON
           </button>
+          <input
+            ref={sqliteRef}
+            type="file"
+            accept=".sqlite,.db,application/x-sqlite3,application/octet-stream"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) doImportSqlite(f);
+              e.target.value = "";
+            }}
+          />
           <input
             ref={fileRef}
             type="file"
@@ -179,7 +236,9 @@ export function SettingsTab() {
           </button>
         </div>
         <div className="text-xs text-slate-500">
-          Data is stored locally in your browser — nothing leaves this device.
+          Your data lives in a real SQLite database, stored as a binary snapshot
+          in this browser's IndexedDB. Nothing leaves the device. The{" "}
+          <code>.sqlite</code> export opens in any SQLite tool.
         </div>
       </div>
     </div>
